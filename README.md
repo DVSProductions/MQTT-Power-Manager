@@ -1,5 +1,8 @@
 # MQTT Power Manager
+<img width="100" alt="mqtt-icon-transparent 1@2x" src="https://github.com/DVSProductions/MQTT-Power-Manager/assets/47152293/66f3bb41-a929-4aa8-8496-ffdd5c2eee89">
+
 This is a simple power manager that uses MQTT to control the power state of your Windows PC.
+
 
 
 ## Installation
