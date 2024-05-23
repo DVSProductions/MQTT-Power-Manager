@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:MQTT_Power_Manager"
         mc:Ignorable="d" SizeToContent="WidthAndHeight" 
-        Title="MQTT PowerManagement Configuration"   WindowStyle="ToolWindow" ResizeMode="NoResize" >
+        Title="MQTT Power Management Configuration"   WindowStyle="ToolWindow" ResizeMode="NoResize" >
 	<Grid DataContext="{Binding Config}" Margin="5">
 		<Grid.ColumnDefinitions>
 			<ColumnDefinition Width="*"/>

@@ -29,8 +29,7 @@ public partial class MainWindow : Window {
 			td.Settings.Enabled = false;
 		}
 		task = TaskService.Instance.FindTask(TaskName);
-		task.Enabled = Config.StartWithWindows;
-
+		Config.StartWithWindows = task.Enabled;
 	}
 
 	private static void SetAutorunState(bool autorun) {
