@@ -239,7 +239,7 @@ public partial class MainWindow : Window {
 			case PcState.Poweroff:
 				//shutdown
 				Dispatcher.BeginInvoke(() => btShutdownAbort.IsEnabled = true);
-				Process.Start("shutdown", $"/s /soft /t {Config.ShutdownTimeout} /c \"MQTT Shutdown request\nShutdown in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
+				Process.Start("shutdown", $"/s /t {Config.ShutdownTimeout} /c \"MQTT Shutdown request\nShutdown in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
 				break;
 			case PcState.PoweroffForced:
 				//shutdown forced
