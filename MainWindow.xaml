@@ -1,0 +1,55 @@
+﻿<Window x:Class="MQTT_Power_Manager.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:MQTT_Power_Manager"
+        mc:Ignorable="d" SizeToContent="WidthAndHeight" 
+        Title="MQTT PowerManagement Configuration"   WindowStyle="ToolWindow" ResizeMode="NoResize" >
+	<Grid DataContext="{Binding Config}" Margin="5">
+		<Grid.ColumnDefinitions>
+			<ColumnDefinition Width="*"/>
+			<ColumnDefinition Width="Auto"/>
+		</Grid.ColumnDefinitions>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="*"/>
+			<RowDefinition Height="Auto"/>
+			<RowDefinition Height="Auto"/>
+		</Grid.RowDefinitions>
+		<StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Horizontal">
+			<Label>Status:</Label>
+			<Label Content="{Binding State}"/>
+			<Label Content="{Binding MQTTServerConnectionState}"/>
+		</StackPanel>
+		<StackPanel Grid.Row="1" Grid.ColumnSpan="2">
+			<CheckBox IsChecked="{Binding StartWithWindows}">Start with Windows</CheckBox>
+			<CheckBox IsChecked="{Binding TrayIcon}">Show Tray Icon</CheckBox>
+			<DockPanel>
+				<Label>Shutdown Timeout:</Label>
+				<TextBox VerticalContentAlignment="Center" Text="{Binding ShutdownTimeout,FallbackValue=59}"/>
+			</DockPanel>
+		</StackPanel>
+		<GroupBox Grid.Row="2" Header="MQTT">
+			<StackPanel Margin="5,0">
+				<Label>Server:</Label>
+				<TextBox Text="{Binding MQTTServer,FallbackValue=192.168.178.69}"/>
+				<Label>Port:</Label>
+				<TextBox Text="{Binding MQTTPort, FallbackValue=1882}"/>
+				<Label>User:</Label>
+				<TextBox Text="{Binding MQTTUser}"/>
+				<Label>Password:</Label>
+				<TextBox Text="{Binding MQTTPassword}"/>
+				<Label>Topic:</Label>
+				<TextBox Text="{Binding MQTTTopic, FallbackValue=pc-power/ThisPC}"/>
+			</StackPanel>
+		</GroupBox>
+		<GroupBox Grid.Row="2" Grid.Column="1" Header="Allowed Actions">
+			<StackPanel x:Name="spActions"/>
+		</GroupBox>
+
+		<Button Grid.Row="3" Grid.ColumnSpan="2" Click="Button_Click" IsEnabled="False" Name="SaveButton" Margin="0,2">Save Configuration</Button>
+		<Button Grid.Row="4" Grid.ColumnSpan="3" Name="btShutdownAbort" Click="btShutdownAbort_Click" IsEnabled="False" Margin="0,2" Background="#FFFF6767">Abort Shutdown</Button>
+	</Grid>
+</Window>

@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>MQTT_Power_Manager</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWindowsForms>True</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>favicon.ico</ApplicationIcon>
+    <PackageIcon>mqtt-icon-transparent 1@2x.png</PackageIcon>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="mqttorg-graphics-master\**" />
+    <EmbeddedResource Remove="mqttorg-graphics-master\**" />
+    <None Remove="mqttorg-graphics-master\**" />
+    <Page Remove="mqttorg-graphics-master\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="favicon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.5.1141" />
+    <PackageReference Include="TaskScheduler" Version="2.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="mqtt-icon-transparent 1%402x.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+</Project>
