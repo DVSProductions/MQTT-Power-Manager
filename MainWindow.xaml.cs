@@ -164,7 +164,7 @@ public partial class MainWindow : Window {
 			while(true) {
 				Thread.Sleep(TimeSpan.FromSeconds(60));
 				if(hasHibernatedOrSleeped) {
-					if(DateTime.Now - lastSleep < TimeSpan.FromSeconds(10)) { //expect at least a 10 second sleep before sending the running status
+					if(DateTime.Now - lastSleep > TimeSpan.FromSeconds(10)) { //expect at least a 10 second sleep before sending the running status
 						hasHibernatedOrSleeped = false;
 						Config.State = PcState.Running;
 					}
@@ -184,7 +184,7 @@ public partial class MainWindow : Window {
 		{
 			var builder = new MqttClientOptionsBuilder()
 			.WithTcpServer(Config.MQTTServer, Config.MQTTPort)
-			.WithClientId("MQTT_Power_Manager");
+			.WithClientId("MQTT_PM_"+ Environment.MachineName);
 			if(Config.MQTTUser != null && Config.MQTTPassword != null)
 				builder = builder.WithCredentials(Config.MQTTUser, Config.MQTTPassword);
 			options = builder.Build();
