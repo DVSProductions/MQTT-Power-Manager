@@ -150,28 +150,25 @@ public partial class MainWindow : Window {
 			spActions.Children.Add(cb);
 		}
 	}
-
+	bool topicChange = false;
 	async void MQTTLoop() {
+		lastTopic = Config.MQTTTopic;
 		await ConnectMQTT(true);
-		var messageBuilder = new MqttApplicationMessageBuilder()
-			.WithTopic(Config.MQTTTopic)
-			.WithPayload(Config.State.ToString());
 		while(!await ConnectMQTT())
 			Thread.Sleep(1000);
-		await mqttclient.PublishAsync(messageBuilder.Build());
-		PublishCurrentState = async () => {
-			messageBuilder.WithPayload(Config.State.ToString());
-			await mqttclient.PublishAsync(messageBuilder.Build());
-		};
+		await updatePublish();
 		await PublishCurrentState();
 
-		var subscribeoptions = new MqttClientSubscribeOptionsBuilder()
-			.WithTopicFilter(Config.MQTTTopic)
-			.Build();
-		await mqttclient.SubscribeAsync(subscribeoptions);
-		Thread t = new(() => {
+		await subscribe();
+		Thread t = new(async () => {
 			while(true) {
 				Thread.Sleep(TimeSpan.FromSeconds(60));
+				if(topicChange) {
+					await mqttclient.UnsubscribeAsync(lastTopic);
+					await subscribe();
+					await updatePublish();
+					topicChange = false;
+				}
 				if(IsStateTemporary) {
 					if(DateTime.Now - lastSleep > TimeSpan.FromSeconds(10)) { //expect at least a 10 second sleep before sending the running status
 						IsStateTemporary = false;
@@ -185,6 +182,22 @@ public partial class MainWindow : Window {
 			}
 		});
 		t.Start();
+
+		async Task subscribe() {
+			var subscribeoptions = new MqttClientSubscribeOptionsBuilder()
+						.WithTopicFilter(Config.MQTTTopic)
+						.Build();
+			await mqttclient.SubscribeAsync(subscribeoptions);
+		}
+
+		async Task updatePublish() {
+			var messageBuilder = new MqttApplicationMessageBuilder().WithTopic(Config.MQTTTopic);
+			PublishCurrentState = async () => {
+				messageBuilder.WithPayload(Config.State.ToString());
+				await mqttclient.PublishAsync(messageBuilder.Build());
+			};
+			await PublishCurrentState();
+		}
 	}
 
 	private async Task<bool> ConnectMQTT(bool reconfigure = false) {
@@ -278,9 +291,11 @@ public partial class MainWindow : Window {
 		File.WriteAllText(SaveFilePath, JsonSerializer.Serialize(Config));
 		File.Encrypt(SaveFilePath);//ensure that nobody can read the passwords stored in the configuration
 	}
-
+	string lastTopic;
 	private void Button_Click(object sender, RoutedEventArgs e) {
 		SaveConfig();
+		if(lastTopic != Config.MQTTTopic)
+			topicChange = true;
 		ConnectMQTT(true);
 		SaveButton.IsEnabled = false;
 	}
