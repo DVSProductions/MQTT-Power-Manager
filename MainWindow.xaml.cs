@@ -281,7 +281,7 @@ public partial class MainWindow : Window {
 
 	private void Button_Click(object sender, RoutedEventArgs e) {
 		SaveConfig();
-		ConnectMQTT(true).Start();
+		ConnectMQTT(true);
 		SaveButton.IsEnabled = false;
 	}
 	private void HandlePowerStates() {
