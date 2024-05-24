@@ -1,8 +1,4 @@
-﻿using System.Configuration;
-using System.Data;
-using System.Windows;
-
-namespace MQTT_Power_Manager;
+﻿namespace MQTT_Power_Manager;
 /// <summary>
 /// Interaction logic for App.xaml
 /// </summary>

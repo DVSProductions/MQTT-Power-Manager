@@ -10,7 +10,6 @@ using System.Reflection;
 using MessageBox = System.Windows.MessageBox;
 using CheckBox = System.Windows.Controls.CheckBox;
 using System.Security.Principal;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace MQTT_Power_Manager;
 /// <summary>
@@ -19,14 +18,19 @@ namespace MQTT_Power_Manager;
 public partial class MainWindow : Window {
 	private const string SaveFilePath = "config.json";
 	private readonly NotifyIcon _notifyIcon;
+	public Func<Task> PublishCurrentState;
+	private MqttClientOptions options;
+	private readonly object locker = new();
+	private readonly SemaphoreSlim sem = new(1, 1);
 
 
 	IMqttClient mqttclient;
 	DateTime lastSleep = DateTime.MinValue;
-	bool hasHibernatedOrSleeped = false;
+	bool IsStateTemporary = false;
 	public Configuration Config { get; set; }
 
 	public MainWindow() {
+		Shutdown("/z");
 #if !DEBUG
 		try {
 #endif
@@ -147,8 +151,6 @@ public partial class MainWindow : Window {
 		}
 	}
 
-
-	public Func<Task> PublishCurrentState;
 	async void MQTTLoop() {
 		await ConnectMQTT(true);
 		var messageBuilder = new MqttApplicationMessageBuilder()
@@ -170,9 +172,9 @@ public partial class MainWindow : Window {
 		Thread t = new(() => {
 			while(true) {
 				Thread.Sleep(TimeSpan.FromSeconds(60));
-				if(hasHibernatedOrSleeped) {
+				if(IsStateTemporary) {
 					if(DateTime.Now - lastSleep > TimeSpan.FromSeconds(10)) { //expect at least a 10 second sleep before sending the running status
-						hasHibernatedOrSleeped = false;
+						IsStateTemporary = false;
 						Config.State = PcState.Running;
 					}
 				}
@@ -185,9 +187,6 @@ public partial class MainWindow : Window {
 		t.Start();
 	}
 
-	MqttClientOptions options;
-	object locker = new();
-	SemaphoreSlim sem = new(1, 1);
 	private async Task<bool> ConnectMQTT(bool reconfigure = false) {
 		await sem.WaitAsync();
 		try {
@@ -242,12 +241,12 @@ public partial class MainWindow : Window {
 						return false;
 				}
 			}
-			catch(MQTTnet.Exceptions.MqttCommunicationTimedOutException e) {
+			catch(MQTTnet.Exceptions.MqttCommunicationTimedOutException) {
 				Config.MQTTServerConnectionState = "Timed out!";
 				await Task.Delay(1000);
 				return false;
 			}
-			catch(ObjectDisposedException e) {
+			catch(ObjectDisposedException) {
 				Config.MQTTServerConnectionState = "Object Disposed!";
 				return false;
 			}
@@ -282,44 +281,56 @@ public partial class MainWindow : Window {
 
 	private void Button_Click(object sender, RoutedEventArgs e) {
 		SaveConfig();
-		ConnectMQTT(true);
+		ConnectMQTT(true).Start();
 		SaveButton.IsEnabled = false;
 	}
 	private void HandlePowerStates() {
+		bool? shutdownsuccess = null;
 		switch(Config.State) {
 			case PcState.Hibernating:
 				lastSleep = DateTime.Now;
-				hasHibernatedOrSleeped = true;
+				IsStateTemporary = true;
 				//hibernate
 				Process.Start("shutdown", "/h");
-				break;
+				return;
 			case PcState.Sleeping:
 				lastSleep = DateTime.Now;
-				hasHibernatedOrSleeped = true;
+				IsStateTemporary = true;
 				//sleep
 				WindowsDLLs.SetSuspendState(false, false, false);
-				break;
+				return;
 			case PcState.Poweroff:
 				//shutdown
-				Dispatcher.BeginInvoke(() => btShutdownAbort.IsEnabled = true);
-				Process.Start("shutdown", $"/s /t {Config.ShutdownTimeout} /c \"MQTT Shutdown request\nShutdown in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
+				shutdownsuccess = Shutdown($"/s /t {Config.ShutdownTimeout} /c \"MQTT Shutdown request\nShutdown in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
 				break;
 			case PcState.PoweroffForced:
 				//shutdown forced
-				Dispatcher.BeginInvoke(() => btShutdownAbort.IsEnabled = true);
-				Process.Start("shutdown", $"/s /f /t {Config.ShutdownTimeout} /c \"MQTT Forced Shutdown request\nForced Shutdown in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
+				shutdownsuccess = Shutdown($"/s /f /t {Config.ShutdownTimeout} /c \"MQTT Forced Shutdown request\nForced Shutdown in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
 				break;
 			case PcState.Reboot:
 				//reboot
-				Dispatcher.BeginInvoke(() => btShutdownAbort.IsEnabled = true);
-				Process.Start("shutdown", $"/r /soft /t {Config.ShutdownTimeout} /c \"MQTT Reboot request\nReboot in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
+				shutdownsuccess = Shutdown($"/r /t {Config.ShutdownTimeout} /c \"MQTT Reboot request\nReboot in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
 				break;
 			case PcState.RebootForced:
 				//reboot forced
-				Dispatcher.BeginInvoke(() => btShutdownAbort.IsEnabled = true);
-				Process.Start("shutdown", $"/r /f /t {Config.ShutdownTimeout} /c \"MQTT Forced Reboot request.\nForced Reboot in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
+				shutdownsuccess = Shutdown($"/r /f /t {Config.ShutdownTimeout} /c \"MQTT Forced Reboot request.\nForced Reboot in {Config.ShutdownTimeout} Seconds.\" /d p:0:0");
 				break;
 		}
+		if(shutdownsuccess == false) {
+			IsStateTemporary = true;//publish the error state only temporarily
+			Config.State = PcState.Error;
+			PublishCurrentState();
+		}
+		else {
+			Dispatcher.BeginInvoke(() => btShutdownAbort.IsEnabled = true);
+		}
+	}
+
+	private static bool Shutdown(string args) {
+		var p = new Process() { StartInfo = new ProcessStartInfo("shutdown", args) { RedirectStandardOutput = true } };
+		p.Start();
+		var result = p.StandardOutput.ReadToEnd();
+		return result.Count(x => x == '\n') <= 5;//detect default error handler
 	}
 
 	private void btShutdownAbort_Click(object sender, RoutedEventArgs e) {
