@@ -10,6 +10,7 @@ using System.Reflection;
 using MessageBox = System.Windows.MessageBox;
 using CheckBox = System.Windows.Controls.CheckBox;
 using System.Security.Principal;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace MQTT_Power_Manager;
 /// <summary>
@@ -54,7 +55,7 @@ public partial class MainWindow : Window {
 			SaveConfig();
 		}
 		else {
-			var test = JsonSerializer.Deserialize<Configuration>(File.ReadAllText(SaveFilePath));
+			var test = LoadConfig();
 			if(test == null) {
 				Config = new Configuration();
 				SaveConfig();
@@ -88,6 +89,8 @@ public partial class MainWindow : Window {
 						SaveConfig();
 						break;
 					case MessageBoxResult.No:
+						var newcfg = LoadConfig() ?? new Configuration();
+						Config = newcfg;
 						Hide();
 						break;
 					case MessageBoxResult.Cancel:
@@ -101,12 +104,14 @@ public partial class MainWindow : Window {
 
 		MQTTLoop();
 #if !DEBUG
-	}
+		}
 		catch(Exception e) {
-			MessageBox.Show(e.Message+"\n"+e.StackTrace, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+			MessageBox.Show(e.Message + "\n" + e.StackTrace, "Error", MessageBoxButton.OK, MessageBoxImage.Error);
 			Environment.Exit(1);
 		}
+
 #endif
+		static Configuration? LoadConfig() => JsonSerializer.Deserialize<Configuration>(File.ReadAllText(SaveFilePath));
 	}
 
 	private void EnableSaveButton(object? sender, PropertyChangedEventArgs e) {
@@ -145,10 +150,12 @@ public partial class MainWindow : Window {
 
 	public Func<Task> PublishCurrentState;
 	async void MQTTLoop() {
-		await ConnectMQTT();
+		await ConnectMQTT(true);
 		var messageBuilder = new MqttApplicationMessageBuilder()
 			.WithTopic(Config.MQTTTopic)
 			.WithPayload(Config.State.ToString());
+		while(!await ConnectMQTT())
+			Thread.Sleep(1000);
 		await mqttclient.PublishAsync(messageBuilder.Build());
 		PublishCurrentState = async () => {
 			messageBuilder.WithPayload(Config.State.ToString());
@@ -170,30 +177,86 @@ public partial class MainWindow : Window {
 					}
 				}
 				if(!mqttclient.IsConnected)
-					ConnectMQTT().Wait();
+					while(!ConnectMQTT().Result)
+						Thread.Sleep(1000);
 				PublishCurrentState().Wait();
 			}
 		});
 		t.Start();
 	}
 
-	private async Task ConnectMQTT() {
-		var mqttFactory = new MqttFactory();
-		mqttclient = mqttFactory.CreateMqttClient();
-		MqttClientOptions options;
-		{
-			var builder = new MqttClientOptionsBuilder()
-			.WithTcpServer(Config.MQTTServer, Config.MQTTPort)
-			.WithClientId("MQTT_PM_"+ Environment.MachineName);
-			if(Config.MQTTUser != null && Config.MQTTPassword != null)
-				builder = builder.WithCredentials(Config.MQTTUser, Config.MQTTPassword);
-			options = builder.Build();
+	MqttClientOptions options;
+	object locker = new();
+	SemaphoreSlim sem = new(1, 1);
+	private async Task<bool> ConnectMQTT(bool reconfigure = false) {
+		await sem.WaitAsync();
+		try {
+			if(reconfigure) {
+				var mqttFactory = new MqttFactory();
+				if(mqttclient != null) {
+					mqttclient.DisconnectedAsync -= disconnector;
+					mqttclient.DisconnectAsync().Wait();
+					mqttclient.Dispose();
+				}
+				mqttclient = mqttFactory.CreateMqttClient();
+				{
+					var builder = new MqttClientOptionsBuilder()
+					.WithTcpServer(Config.MQTTServer, Config.MQTTPort)
+					.WithClientId("MQTT_PM_" + Environment.MachineName);
+					if(Config.MQTTUser != null && Config.MQTTPassword != null)
+						builder = builder.WithCredentials(Config.MQTTUser, Config.MQTTPassword);
+					options = builder.Build();
+				}
+				mqttclient.DisconnectedAsync += disconnector;
+			}
+			if(mqttclient == null)
+				return false;
+			else if(mqttclient.IsConnected)
+				return true;
+			Config.MQTTServerConnectionState = "Connecting";
+			try {
+				switch((await mqttclient.ConnectAsync(options)).ResultCode) {
+					case MqttClientConnectResultCode.Success:
+						Config.MQTTServerConnectionState = "Connected!";
+						mqttclient.ApplicationMessageReceivedAsync += MessageReceived;
+						return true;
+					case MqttClientConnectResultCode.BadUserNameOrPassword:
+						Config.MQTTServerConnectionState = "Bad Username or Password!";
+						await Task.Delay(1000);
+						return false;
+					case MqttClientConnectResultCode.NotAuthorized:
+						Config.MQTTServerConnectionState = "Not Authorized!";
+						await Task.Delay(1000);
+						return false;
+					case MqttClientConnectResultCode.UnspecifiedError:
+						Config.MQTTServerConnectionState = "Unspecified Error!";
+						await Task.Delay(1000);
+						return false;
+					case MqttClientConnectResultCode.ServerUnavailable:
+						Config.MQTTServerConnectionState = "Server Unavailable!";
+						await Task.Delay(1000);
+						return false;
+					default:
+						Config.MQTTServerConnectionState = "Unknown Error!";
+						await Task.Delay(1000);
+						return false;
+				}
+			}
+			catch(MQTTnet.Exceptions.MqttCommunicationTimedOutException e) {
+				Config.MQTTServerConnectionState = "Timed out!";
+				await Task.Delay(1000);
+				return false;
+			}
+			catch(ObjectDisposedException e) {
+				Config.MQTTServerConnectionState = "Object Disposed!";
+				return false;
+			}
 		}
-		Config.MQTTServerConnectionState = "Connecting";
-		await mqttclient.ConnectAsync(options);
-		Config.MQTTServerConnectionState = "Connected!";
-		mqttclient.DisconnectedAsync += async _ => Config.MQTTServerConnectionState = "Disconnected!";
-		mqttclient.ApplicationMessageReceivedAsync += MessageReceived;
+		finally {
+			sem.Release();
+		}
+
+		Task disconnector(MqttClientDisconnectedEventArgs _) { Config.MQTTServerConnectionState = "Disconnected!"; return Task.CompletedTask; };
 	}
 
 	private async Task MessageReceived(MqttApplicationMessageReceivedEventArgs args) {
@@ -219,7 +282,7 @@ public partial class MainWindow : Window {
 
 	private void Button_Click(object sender, RoutedEventArgs e) {
 		SaveConfig();
-		ConnectMQTT();
+		ConnectMQTT(true);
 		SaveButton.IsEnabled = false;
 	}
 	private void HandlePowerStates() {
