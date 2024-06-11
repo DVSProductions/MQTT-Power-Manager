@@ -10,6 +10,7 @@ using System.Reflection;
 using MessageBox = System.Windows.MessageBox;
 using CheckBox = System.Windows.Controls.CheckBox;
 using System.Security.Principal;
+using Microsoft.Win32;
 
 namespace MQTT_Power_Manager;
 /// <summary>
@@ -17,10 +18,11 @@ namespace MQTT_Power_Manager;
 /// </summary>
 public partial class MainWindow : Window {
 	private const string SaveFilePath = "config.json";
+	private const int UpdateDelay = 60;
 	private readonly NotifyIcon _notifyIcon;
 	public Func<Task> PublishCurrentState;
 	private MqttClientOptions options;
-	private readonly object locker = new();
+	//private readonly object locker = new();
 	private readonly SemaphoreSlim sem = new(1, 1);
 
 
@@ -103,7 +105,13 @@ public partial class MainWindow : Window {
 			};
 			Hide();
 		};
-
+		SystemEvents.SessionEnding += (_, e) => {
+			if(e.Reason == SessionEndReasons.SystemShutdown) {
+				Config.State = PcState.Poweroff;
+				if(mqttclient?.IsConnected == true)
+					PublishCurrentState?.Invoke().Wait();
+			}
+		};
 		CreateActions();
 
 		MQTTLoop();
@@ -162,7 +170,7 @@ public partial class MainWindow : Window {
 		await subscribe();
 		Thread t = new(async () => {
 			while(true) {
-				Thread.Sleep(TimeSpan.FromSeconds(60));
+				Thread.Sleep(TimeSpan.FromSeconds(UpdateDelay));
 				if(topicChange) {
 					await mqttclient.UnsubscribeAsync(lastTopic);
 					await subscribe();
@@ -191,7 +199,10 @@ public partial class MainWindow : Window {
 		}
 
 		async Task updatePublish() {
-			var messageBuilder = new MqttApplicationMessageBuilder().WithTopic(Config.MQTTTopic);
+			var messageBuilder = new MqttApplicationMessageBuilder()
+				.WithTopic(Config.MQTTTopic)
+				.WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
+				.WithRetainFlag(true);
 			PublishCurrentState = async () => {
 				messageBuilder.WithPayload(Config.State.ToString());
 				await mqttclient.PublishAsync(messageBuilder.Build());
@@ -214,7 +225,14 @@ public partial class MainWindow : Window {
 				{
 					var builder = new MqttClientOptionsBuilder()
 					.WithTcpServer(Config.MQTTServer, Config.MQTTPort)
-					.WithClientId("MQTT_PM_" + Environment.MachineName);
+					.WithClientId("MQTT_PM_" + Environment.MachineName)
+					.WithWillRetain(true)
+					.WithWillPayload(Encoding.ASCII.GetBytes(PcState.Poweroff.ToString()))
+					.WithWillTopic(Config.MQTTTopic)
+					.WithWillQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
+					//.WithWillDelayInterval(UpdateDelay * 2)//requires mqtt 5
+
+					;
 					if(Config.MQTTUser != null && Config.MQTTPassword != null)
 						builder = builder.WithCredentials(Config.MQTTUser, Config.MQTTPassword);
 					options = builder.Build();
