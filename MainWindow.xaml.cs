@@ -36,82 +36,82 @@ public partial class MainWindow : Window {
 #if !DEBUG
 		try {
 #endif
-		//MessageBox.Show(string.Join('\n', Environment.GetCommandLineArgs()));
-		mutex = Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == relaunchFlag
-			? EnsureSigleInstance(true)
-			: EnsureSigleInstance();
-		//ensure admin
-		{
-			var wi = WindowsIdentity.GetCurrent();
-			var wp = new WindowsPrincipal(wi);
-			if(!wp.IsInRole(WindowsBuiltInRole.Administrator)) {
-				ProcessStartInfo psi = new ProcessStartInfo {
-					FileName = Environment.ProcessPath,
-					WorkingDirectory = Path.GetDirectoryName(Environment.ProcessPath),
-					Verb = "runas",
-					UseShellExecute = true
-				};
-				Process.Start(psi);
-				Environment.Exit(0);
+			//MessageBox.Show(string.Join('\n', Environment.GetCommandLineArgs()));
+			mutex = Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == relaunchFlag
+				? EnsureSigleInstance(true)
+				: EnsureSigleInstance();
+			//ensure admin
+			{
+				var wi = WindowsIdentity.GetCurrent();
+				var wp = new WindowsPrincipal(wi);
+				if(!wp.IsInRole(WindowsBuiltInRole.Administrator)) {
+					ProcessStartInfo psi = new ProcessStartInfo {
+						FileName = Environment.ProcessPath,
+						WorkingDirectory = Path.GetDirectoryName(Environment.ProcessPath),
+						Verb = "runas",
+						UseShellExecute = true
+					};
+					Process.Start(psi);
+					Environment.Exit(0);
+				}
 			}
-		}
 
 
-		DataContext = this;
-		//load configuration
-		if(!File.Exists(SaveFilePath)) {
-			Config = new Configuration();
-			SaveConfig();
-		}
-		else {
-			var test = LoadConfig();
-			if(test == null) {
+			DataContext = this;
+			//load configuration
+			if(!File.Exists(SaveFilePath)) {
 				Config = new Configuration();
-				SaveConfig();
+				SaveConfig(false);
 			}
-			else
-				Config = test;
-		}
-		CreateAutorunTask();
-		Config.PropertyChanged += EnableSaveButton;
-		Config.PropertyChanged += HandleTrayIcon;
-		Config.PropertyChanged += HandleAutorun;
-		InitializeComponent();
-		_notifyIcon = SetupIcon();
-		//get startup parameters
-		var cmd = Environment.GetCommandLineArgs();
-		if(cmd.Length > 1) {
-			if(cmd[1] == "-service")
+			else {
+				var test = LoadConfig();
+				if(test == null) {
+					Config = new Configuration();
+					SaveConfig(false);
+				}
+				else
+					Config = test;
+			}
+			CreateAutorunTask();
+			Config.PropertyChanged += EnableSaveButton;
+			Config.PropertyChanged += HandleTrayIcon;
+			Config.PropertyChanged += HandleAutorun;
+			InitializeComponent();
+			_notifyIcon = SetupIcon();
+			//get startup parameters
+			var cmd = Environment.GetCommandLineArgs();
+			if(cmd.Length > 1) {
+				if(cmd[1] == "-service")
+					Hide();
+			}
+			Closing += (_, e) => {
+				e.Cancel = true;
+				if(SaveButton.IsEnabled) {
+					switch(MessageBox.Show("You hace unsaved changes.\nDo you wish to save them now?", "Unsaved Changes", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning)) {
+						case MessageBoxResult.Yes:
+							SaveConfig();
+							break;
+						case MessageBoxResult.No:
+							var newcfg = LoadConfig() ?? new Configuration();
+							Config = newcfg;
+							Hide();
+							break;
+						case MessageBoxResult.Cancel:
+							return;
+					}
+				};
 				Hide();
-		}
-		Closing += (_, e) => {
-			e.Cancel = true;
-			if(SaveButton.IsEnabled) {
-				switch(MessageBox.Show("You hace unsaved changes.\nDo you wish to save them now?", "Unsaved Changes", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning)) {
-					case MessageBoxResult.Yes:
-						SaveConfig();
-						break;
-					case MessageBoxResult.No:
-						var newcfg = LoadConfig() ?? new Configuration();
-						Config = newcfg;
-						Hide();
-						break;
-					case MessageBoxResult.Cancel:
-						return;
+			};
+			SystemEvents.SessionEnding += (_, e) => {
+				if(e.Reason == SessionEndReasons.SystemShutdown) {
+					Config.State = PcState.Poweroff;
+					if(mqttclient?.IsConnected == true)
+						PublishCurrentState?.Invoke().Wait();
 				}
 			};
-			Hide();
-		};
-		SystemEvents.SessionEnding += (_, e) => {
-			if(e.Reason == SessionEndReasons.SystemShutdown) {
-				Config.State = PcState.Poweroff;
-				if(mqttclient?.IsConnected == true)
-					PublishCurrentState?.Invoke().Wait();
-			}
-		};
-		CreateActions();
+			CreateActions();
 
-		MQTTLoop();
+			MQTTLoop();
 #if !DEBUG
 		}
 		catch(Exception e) {
@@ -305,13 +305,16 @@ public partial class MainWindow : Window {
 	private void SaveConfig(bool relaunch = true) {
 		File.WriteAllText(SaveFilePath, JsonSerializer.Serialize(Config));
 		File.Encrypt(SaveFilePath);//ensure that nobody can read the passwords stored in the configuration
-		if(relaunch) { //restart app to avoid any issues with the new configuration
+		var pp = Environment.ProcessPath;
+		if(relaunch && pp != null) { //restart app to avoid any issues with the new configuration
 			mutex.ReleaseMutex();
 			mutex.Close();
 			mutex.Dispose();
-			_notifyIcon.Visible = false;
-			_notifyIcon.Dispose();
-			Process.Start(Environment.ProcessPath, relaunchFlag);
+			if(_notifyIcon != null) {//close the tray icon (if it exists)
+				_notifyIcon.Visible = false;
+				_notifyIcon.Dispose();
+			}
+			Process.Start(pp, relaunchFlag);
 			Environment.Exit(0);
 		}
 
