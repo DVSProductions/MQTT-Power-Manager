@@ -11,6 +11,7 @@ using MessageBox = System.Windows.MessageBox;
 using CheckBox = System.Windows.Controls.CheckBox;
 using System.Security.Principal;
 using Microsoft.Win32;
+using System;
 
 namespace MQTT_Power_Manager;
 /// <summary>
@@ -19,7 +20,7 @@ namespace MQTT_Power_Manager;
 public partial class MainWindow : Window {
 	private const string SaveFilePath = "config.json";
 	private const int UpdateDelay = 60;
-	private readonly NotifyIcon _notifyIcon;
+	private const string relaunchFlag = "-relaunch";
 	public Func<Task> PublishCurrentState;
 	private MqttClientOptions options;
 	//private readonly object locker = new();
@@ -32,11 +33,13 @@ public partial class MainWindow : Window {
 	public Configuration Config { get; set; }
 
 	public MainWindow() {
-		Shutdown("/z");
 #if !DEBUG
 		try {
 #endif
-		mutex = EnsureSigleInstance();
+		//MessageBox.Show(string.Join('\n', Environment.GetCommandLineArgs()));
+		mutex = Environment.GetCommandLineArgs().Length > 1 && Environment.GetCommandLineArgs()[1] == relaunchFlag
+			? EnsureSigleInstance(true)
+			: EnsureSigleInstance();
 		//ensure admin
 		{
 			var wi = WindowsIdentity.GetCurrent();
@@ -74,13 +77,7 @@ public partial class MainWindow : Window {
 		Config.PropertyChanged += HandleTrayIcon;
 		Config.PropertyChanged += HandleAutorun;
 		InitializeComponent();
-		_notifyIcon = new NotifyIcon {
-			Icon = System.Drawing.Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location),
-			Visible = Config.TrayIcon,
-			ContextMenuStrip = CreateContextMenu()
-		};
-		_notifyIcon.DoubleClick += ShowWindow;
-		System.Windows.Application.Current.Exit += (_, __) => _notifyIcon.Dispose();
+		_notifyIcon = SetupIcon();
 		//get startup parameters
 		var cmd = Environment.GetCommandLineArgs();
 		if(cmd.Length > 1) {
@@ -305,9 +302,19 @@ public partial class MainWindow : Window {
 		HandlePowerStates();
 	}
 
-	private void SaveConfig() {
+	private void SaveConfig(bool relaunch = true) {
 		File.WriteAllText(SaveFilePath, JsonSerializer.Serialize(Config));
 		File.Encrypt(SaveFilePath);//ensure that nobody can read the passwords stored in the configuration
+		if(relaunch) { //restart app to avoid any issues with the new configuration
+			mutex.ReleaseMutex();
+			mutex.Close();
+			mutex.Dispose();
+			_notifyIcon.Visible = false;
+			_notifyIcon.Dispose();
+			Process.Start(Environment.ProcessPath, relaunchFlag);
+			Environment.Exit(0);
+		}
+
 	}
 	string lastTopic;
 	private void Button_Click(object sender, RoutedEventArgs e) {
